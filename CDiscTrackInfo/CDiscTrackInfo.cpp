@@ -12,8 +12,18 @@
 
 
 // CDのドライブレター取得
-void get_cd_drive()
+HANDLE open_first_cd_drive()
 {
+	HANDLE fh = 0;
+
+	const wchar_t* drives[] = {
+		L"\\\\.\\A:", L"\\\\.\\B:", L"\\\\.\\C:", L"\\\\.\\D:", L"\\\\.\\E:", L"\\\\.\\F:",
+		L"\\\\.\\G:", L"\\\\.\\H:", L"\\\\.\\I:", L"\\\\.\\J:", L"\\\\.\\K:", L"\\\\.\\L:",
+		L"\\\\.\\M:", L"\\\\.\\N:", L"\\\\.\\O:", L"\\\\.\\P:", L"\\\\.\\Q:", L"\\\\.\\R:",
+		L"\\\\.\\S:", L"\\\\.\\T:", L"\\\\.\\U:", L"\\\\.\\V:", L"\\\\.\\W:", L"\\\\.\\X:",
+		L"\\\\.\\Y:", L"\\\\.\\Z:",
+	};
+
 	DWORD drive = GetLogicalDrives();
 	for (int i = 0, flag = 1; i < 26; i++, flag <<= 1) {
 		if (!(drive & flag)) continue;
@@ -22,14 +32,19 @@ void get_cd_drive()
 		if (GetDriveTypeA(letter) == DRIVE_CDROM)
 		{
 			//見つかった
+			fh = CreateFileW(drives[i], GENERIC_READ | GENERIC_WRITE,
+				FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+				FILE_ATTRIBUTE_NORMAL, NULL);
+			return fh;
 		}
 	}
+	return 0;
 }
 
+
 // 各トラックの開始位置を 秒 で格納する
-int get_pos_min(unsigned int* pos)
+int get_pos_min(HANDLE fh, unsigned int* pos)
 {
-	HANDLE fh;
 	DWORD ioctl_bytes;
 	BOOL ioctl_rv;
 
@@ -42,10 +57,6 @@ int get_pos_min(unsigned int* pos)
 		SCSI_PASS_THROUGH_DIRECT s;
 		UCHAR sense[128];
 	} sptd;
-
-	fh = CreateFileW(L"\\\\.\\F:", GENERIC_READ | GENERIC_WRITE,
-		FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
-		FILE_ATTRIBUTE_NORMAL, NULL);
 
 	memset(&sptd, 0, sizeof(sptd));
 	sptd.s.Length = sizeof(sptd.s);
@@ -63,7 +74,10 @@ int get_pos_min(unsigned int* pos)
 
 	// buf[0]  0x11 -> pre emphasis      0x01 -> no emphasis
 
-	CloseHandle(fh);
+	if (sptd.sense[0] != 0)
+	{
+		return 0;
+	}
 
 	int i = 0;
 	for (i = 0; i <= buf[3]; ++i)
@@ -83,10 +97,9 @@ int get_pos_min(unsigned int* pos)
 	return j;
 }
 
-int get_pos(unsigned int* pos)
+int get_pos(HANDLE fh, unsigned int* pos)
 {
-	HANDLE fh;
-	DWORD ioctl_bytes;
+	DWORD ioctl_bytes = 0;
 	BOOL ioctl_rv;
 
 	// READ TOC (LBA)
@@ -98,10 +111,6 @@ int get_pos(unsigned int* pos)
 		SCSI_PASS_THROUGH_DIRECT s;
 		UCHAR sense[128];
 	} sptd;
-
-	fh = CreateFileW(L"\\\\.\\F:", GENERIC_READ | GENERIC_WRITE,
-		FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
-		FILE_ATTRIBUTE_NORMAL, NULL);
 
 	memset(&sptd, 0, sizeof(sptd));
 	sptd.s.Length = sizeof(sptd.s);
@@ -119,7 +128,10 @@ int get_pos(unsigned int* pos)
 
 	// buf[0]  0x11 -> pre emphasis      0x01 -> no emphasis
 
-	CloseHandle(fh);
+	if (sptd.sense[0] != 0)
+	{
+		return 0;
+	}
 
 	int i = 0;
 	for (i = 0; i < buf[3]; ++i)
@@ -134,9 +146,8 @@ int get_pos(unsigned int* pos)
 	return i;
 }
 
-int check(unsigned int pos)
+int check(HANDLE fh, unsigned int pos)
 {
-	HANDLE fh;
 	DWORD ioctl_bytes;
 	BOOL ioctl_rv;
 
@@ -155,10 +166,6 @@ int check(unsigned int pos)
 		UCHAR sense[128];
 	} sptd;
 
-	fh = CreateFileW(L"\\\\.\\F:", GENERIC_READ | GENERIC_WRITE,
-		FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
-		FILE_ATTRIBUTE_NORMAL, NULL);
-
 	memset(&sptd, 0, sizeof(sptd));
 	sptd.s.Length = sizeof(sptd.s);
 	sptd.s.CdbLength = sizeof(cdb);
@@ -175,8 +182,6 @@ int check(unsigned int pos)
 
 	// buf[0]  0x11 -> pre emphasis      0x01 -> no emphasis
 
-	CloseHandle(fh);
-
 	if (buf[0] & 0x10) return 1;
 
 	return 0;
@@ -184,18 +189,32 @@ int check(unsigned int pos)
 
 int main()
 {
-    //std::cout << "Hello World!\n"; 
 	unsigned int pos[128];
 	unsigned int pos_min[128];
-	int num = 	get_pos(pos);
-	get_pos_min(pos_min);
+
+	HANDLE fh;
+	fh = open_first_cd_drive();
+	if (fh == 0)
+	{
+		std::cout << "No CD drive was found.\n";
+		return 0;
+	}
+
+	int num = 	get_pos(fh, pos);
+	if (num == 0)
+	{
+		std::cout << "No Compact Disc was found.\n";
+	}
+
+	get_pos_min(fh, pos_min);
 	for (int i = 0; i < num; ++i)
 	{
-		if (check(pos[i])) std::cout << "track " << i+1 << "  " << pos_min[i] << " sec   pre-emphasis: yes";
-		else               std::cout << "track " << i+1 << "  " << pos_min[i] << " sec   pre-emphasis: no";
-		//std::cout << check(pos[i]) << "   " << pos_min[i];
+		if (check(fh, pos[i])) std::cout << "track " << i+1 << "  " << pos_min[i] << " sec   pre-emphasis: yes";
+		else                   std::cout << "track " << i+1 << "  " << pos_min[i] << " sec   pre-emphasis: no";
 		std::cout << "\n"; 
 	}
+
+	CloseHandle(fh);
 
 }
 
