@@ -10,6 +10,22 @@
 #include <ntddscsi.h>
 #include <stddef.h>
 
+
+// CDのドライブレター取得
+void get_cd_drive()
+{
+	DWORD drive = GetLogicalDrives();
+	for (int i = 0, flag = 1; i < 26; i++, flag <<= 1) {
+		if (!(drive & flag)) continue;
+		char letter[20];
+		sprintf_s(letter, sizeof(letter), "%c:\\", 'A' + i);
+		if (GetDriveTypeA(letter) == DRIVE_CDROM)
+		{
+			//見つかった
+		}
+	}
+}
+
 // 各トラックの開始位置を 秒 で格納する
 int get_pos_min(unsigned int* pos)
 {
@@ -50,7 +66,7 @@ int get_pos_min(unsigned int* pos)
 	CloseHandle(fh);
 
 	int i = 0;
-	for (i = 0; i < buf[3]; ++i)
+	for (i = 0; i <= buf[3]; ++i)
 	{
 		
 		unsigned int a =
@@ -58,7 +74,13 @@ int get_pos_min(unsigned int* pos)
 			(unsigned int)buf[8 + i * 8 + 2];
 		pos[i] = a;
 	}
-	return i;
+
+	int j = 0;
+	for (j = 0; j < i; ++j)
+	{
+		pos[j] = pos[j + 1] - pos[j];
+	}
+	return j;
 }
 
 int get_pos(unsigned int* pos)
@@ -169,7 +191,9 @@ int main()
 	get_pos_min(pos_min);
 	for (int i = 0; i < num; ++i)
 	{
-		std::cout << check(pos[i]) << "   " << pos_min[i];
+		if (check(pos[i])) std::cout << "track " << i+1 << "  " << pos_min[i] << " sec   pre-emphasis: yes";
+		else               std::cout << "track " << i+1 << "  " << pos_min[i] << " sec   pre-emphasis: no";
+		//std::cout << check(pos[i]) << "   " << pos_min[i];
 		std::cout << "\n"; 
 	}
 
