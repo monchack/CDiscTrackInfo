@@ -97,13 +97,13 @@ int get_pos_min(HANDLE fh, unsigned int* pos)
 	return j;
 }
 
-int get_pos(HANDLE fh, unsigned int* pos)
+int get_pos(HANDLE fh, unsigned int* pos, int* pre_emphasis)
 {
 	DWORD ioctl_bytes = 0;
 	BOOL ioctl_rv;
 
 	// READ TOC (LBA)
-	const unsigned char cdb[] = { 0x43, 0, 0x00, 0, 0, 0, 0, 4, 0, 0x00, 0, 0 };
+	const unsigned char cdb[] = { 0x43, 0, 0x00, 0, 0, 0, 0, 1, 0, 0x00, 0, 0 };
 
 	UCHAR buf[2352];
 	struct sptd_with_sense
@@ -128,7 +128,7 @@ int get_pos(HANDLE fh, unsigned int* pos)
 
 	// buf[0]  0x11 -> pre emphasis      0x01 -> no emphasis
 
-	if (sptd.sense[0] != 0)
+	if (sptd.sense[0] != 0) // 70h (current error), 71h(deferred error), 72h, 7Eh(vendor error)    00h to 6Fh are not defined
 	{
 		return 0;
 	}
@@ -142,9 +142,13 @@ int get_pos(HANDLE fh, unsigned int* pos)
 			(unsigned int)buf[8 + i * 8 + 2] << 8 |
 			(unsigned int)buf[8 + i * 8 + 3];
 		pos[i] = a;
+
+		if (buf[5 + i * 8] & 0x01) pre_emphasis[i] = 1;
+		else pre_emphasis[i] = 0;
 	}
 	return i;
 }
+
 
 int check(HANDLE fh, unsigned int pos)
 {
@@ -187,10 +191,13 @@ int check(HANDLE fh, unsigned int pos)
 	return 0;
 }
 
+
+
 int main()
 {
 	unsigned int pos[128];
 	unsigned int pos_min[128];
+	int pre_emphasis_toc[128];
 
 	HANDLE fh;
 	fh = open_first_cd_drive();
@@ -200,7 +207,7 @@ int main()
 		return 0;
 	}
 
-	int num = 	get_pos(fh, pos);
+	int num = 	get_pos(fh, pos, pre_emphasis_toc);
 	if (num == 0)
 	{
 		std::cout << "No Compact Disc was found.\n";
@@ -209,8 +216,8 @@ int main()
 	get_pos_min(fh, pos_min);
 	for (int i = 0; i < num; ++i)
 	{
-		if (check(fh, pos[i])) std::cout << "track " << i+1 << "  " << pos_min[i] << " sec   pre-emphasis: yes";
-		else                   std::cout << "track " << i+1 << "  " << pos_min[i] << " sec   pre-emphasis: no";
+		if (check(fh, pos[i])) std::cout << "track " << i+1 << "  " << pos_min[i] << " sec   pre-emphasis: yes" << "  (toc pre_emphasis: " << pre_emphasis_toc[i] << ")";
+		else                   std::cout << "track " << i+1 << "  " << pos_min[i] << " sec   pre-emphasis: no " << "  (toc pre_emphasis: " << pre_emphasis_toc[i] << ")";
 		std::cout << "\n"; 
 	}
 
